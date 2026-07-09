@@ -1,0 +1,23 @@
+# Python temporary and environment files
+__pycache__/
+*.pyc
+env/
+venv/
+.env
+
+# PlatformIO temporary build caches
+.pio/
+.clang_complete
+.gcc-flags.json
+.provider_cache
+
+# Android Studio local files
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+
+# OS Specific files
+.DS_Store
+Thumbs.db

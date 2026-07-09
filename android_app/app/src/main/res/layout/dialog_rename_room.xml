@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    app:cardCornerRadius="20dp"
+    app:cardElevation="0dp"
+    android:layout_margin="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#FFFFFF"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Room Configuration"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#0F172A"
+            android:fontFamily="sans-serif-medium"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Customize local parameters and trigger constraints for this location node."
+            android:textSize="12sp"
+            android:textColor="#64748B"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="20dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ROOM CUSTOM NAME ALIAS"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#94A3B8"
+            android:layout_marginBottom="6dp"/>
+
+        <EditText
+            android:id="@+id/editCustomRoomName"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:hint="e.g., Main Server Closet"
+            android:inputType="textCapWords"
+            android:textSize="14sp"
+            android:textColor="#0F172A"
+            android:background="@android:drawable/editbox_background"
+            android:paddingHorizontal="12dp"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="TEMPERATURE WARNING LIMIT (°C)"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#94A3B8"
+            android:layout_marginBottom="6dp"/>
+
+        <EditText
+            android:id="@+id/editRoomThreshold"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:hint="e.g., 26.5"
+            android:inputType="numberDecimal"
+            android:textSize="14sp"
+            android:textColor="#0F172A"
+            android:background="@android:drawable/editbox_background"
+            android:paddingHorizontal="12dp"
+            android:layout_marginBottom="24dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="end">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCancelRename"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:text="Cancel"
+                android:textSize="13sp"
+                android:textColor="#64748B"
+                android:textAllCaps="false"
+                android:layout_marginRight="8dp"/>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSaveRename"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:text="Save Settings"
+                android:textSize="13sp"
+                android:textAllCaps="false"
+                app:cornerRadius="22dp"
+                android:backgroundTint="#0F172A"
+                android:textColor="#FFFFFF"/>
+        </LinearLayout>
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>
