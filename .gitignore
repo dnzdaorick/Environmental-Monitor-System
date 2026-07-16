@@ -21,3 +21,8 @@ local.properties
 # OS Specific files
 .DS_Store
 Thumbs.db
+
+# Local hardware and mobile credential files
+firmware/src/secrets.h
+android_app/app/src/main/java/com/example/environmentalmonitor/network/Config.kt
+

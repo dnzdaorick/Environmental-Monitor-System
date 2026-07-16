@@ -11,7 +11,7 @@ db_config = {
     "host": "localhost",
     "user": "YOUR_DATABASE_USERNAME",          
     "password": "YOUR_DATABASE_PASSWORD",  
-    "database": "YOUR_DATABASE_NAME"
+    "database": "environmental_monitor"
 }
 
 MQTT_BROKER = "localhost"
@@ -68,13 +68,14 @@ def on_message(client, userdata, msg):
         
         payload_data = json.loads(raw_payload)
         node_id = payload_data["node"]             
-        temperature = payload_data["temperature"]
-        humidity = payload_data["humidity"]
-        pressure = payload_data["pressure"]
+        temperature = float(payload_data["temperature"])
+        humidity = float(payload_data["humidity"])
+        pressure = float(payload_data["pressure"])
 
-        # Spin up localized database interaction instance
+        # 1. Update the real-time cache table row (Your clean fixed version)
         conn = mysql.connector.connect(**db_config)
-        cursor = conn.cursor()  # FIXED: Changed from db_connection.cursor()
+        # Pro-Tip: Adding dictionary=True makes fetching row data much cleaner
+        cursor = conn.cursor(dictionary=True)  
         
         sql = """
             INSERT INTO environmental_telemetry (node_id, temperature, humidity, pressure, timestamp)
@@ -86,13 +87,31 @@ def on_message(client, userdata, msg):
                 timestamp = NOW()
         """
         cursor.execute(sql, (node_id, temperature, humidity, pressure))
-        conn.commit()  # FIXED: Changed from db_connection.commit()
-        cursor.close()
-        conn.close()   # FIXED: Changed from db_connection.close()
+        conn.commit()
         print(f"💾 SUCCESS: Database updated for primary key footprint -> {node_id}")
 
+        # 2. AUTOMATION ENGINE: Fetch this specific room's threshold limit
+        cursor.execute("SELECT temperature_threshold FROM room_registry WHERE node_id = %s", (node_id,))
+        row = cursor.fetchone()
+        
+        # Fallback to a safe 30.0°C limit if the user hasn't configured it via Android yet
+        room_threshold = float(row["temperature_threshold"]) if row else 30.0
+        
+        cursor.close()
+        conn.close() 
+        
+        # 3. REAL-TIME DISPATCHER: Evaluate rules and blast commands directly via the open client channel
+        if temperature > room_threshold:
+            alert_msg = f"ALERT_{node_id.upper()}_ON"
+            print(f"[🚨 TRIGGER] Temperature ({temperature}°C) EXCEEDED limit ({room_threshold}°C)! Sending: {alert_msg}")
+            client.publish("monitor/nodes/alerts", alert_msg) 
+        else:
+            alert_msg = f"ALERT_{node_id.upper()}_OFF"
+            print(f"[✅ SAFE] Temperature ({temperature}°C) is under limit ({room_threshold}°C). Sending: {alert_msg}")
+            client.publish("monitor/nodes/alerts", alert_msg)
+            
     except Exception as e:
-        print(f"❌ FAILED PROCESS PIPELINE: Couldn't write to database. Error: {e}")
+        print(f"❌ [MQTT Core Error] Failed logic execution: {e}")
 
 mqtt_client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 mqtt_client.on_message = on_message

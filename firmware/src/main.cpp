@@ -2,37 +2,64 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BME280.h>
+#include <DHT.h>
 #include <PubSubClient.h>
 
 // -------------------------------------------------------------------------
-// ESP32 HARDWARE PIN DEFINITIONS
+// HARDWARE PIN DEFINITIONS
 // -------------------------------------------------------------------------
-#define GREEN_LED_PIN 12  // GPIO 12
-#define RED_LED_PIN   14  // GPIO 14
-#define BUZZER_PIN    27  // GPIO 27
+#define BOOT_BUTTON_PIN 0   // Built-in BOOT button mapped to GPIO 0
+#define GREEN_LED_PIN   12  // GPIO 12
+#define RED_LED_PIN     14  // GPIO 14
+#define BUZZER_PIN      27  // GPIO 27
+
+#define DHTPIN          23  // DHT11 Data pin hooked to GPIO 23
+#define DHTTYPE         DHT11
 
 // -------------------------------------------------------------------------
 // NETWORK & BROKER CONFIGURATION
 // -------------------------------------------------------------------------
-const char* ssid     = "YOUR_WIFI_SSID";
+const char* ssid     = "YOUR_WIFI_SSID-";
 const char* password = "YOUR_WIFI_PASSWORD";
-const char* mqtt_server = "YOUR_COMPUTER_LOCAL_IP";
+const char* mqtt_server = "YOUR_COMPUTER_LOCAL_IP"; 
 
 // Global System Driver Structures
 WiFiClient espClient;
 PubSubClient client(espClient);
-Adafruit_BME280 bme;
+DHT dht(DHTPIN, DHTTYPE);
 
 String uniqueNodeId;
 String telemetryTopic;
 const char* alertTopic = "monitor/nodes/alerts";
 
 unsigned long lastTelemetryTime = 0;
-const unsigned long telemetryInterval = 4000; // 4-second transmit interval
+const unsigned long telemetryInterval = 4000; 
+
+// --- AUTOMATION STATE FLAG ---
+bool alertActive = false; // Tracks if this specific node is currently violating thresholds
 
 // -------------------------------------------------------------------------
-// MQTT INGRESS ALERT ENGINE (ACTIVE BUZZER + LED TRIGGERS)
+// STARTUP GATEKEEPER FUNCTION
+// -------------------------------------------------------------------------
+void waitForButtonPress() {
+    // GPIO 0 uses an internal pull-up resistor (sits at HIGH until pressed)
+    pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP); 
+    
+    Serial.println("\n==================================================");
+    Serial.println("⏸️ SYSTEM PAUSED: Press the BOOT button to start...");
+    Serial.println("==================================================");
+    
+    // Loop indefinitely as long as the button reads HIGH (not pressed)
+    while (digitalRead(BOOT_BUTTON_PIN) == HIGH) {
+        delay(50); // Small delay to prevent watchdog timer resets
+    }
+    
+    Serial.println("\n▶️ Button press detected! Initializing systems...");
+    delay(500); // Brief hardware debounce delay
+}
+
+// -------------------------------------------------------------------------
+// MQTT INGRESS ALERT ENGINE (UPDATED FOR ASYNCHRONOUS PULSING)
 // -------------------------------------------------------------------------
 void callback(char* topic, byte* payload, unsigned int length) {
     String incomingMessage = "";
@@ -49,16 +76,17 @@ void callback(char* topic, byte* payload, unsigned int length) {
     triggerOffSignal.toUpperCase();
 
     if (incomingMessage == triggerOnSignal) {
-        digitalWrite(RED_LED_PIN, HIGH);   // Turn on alert light
-        digitalWrite(BUZZER_PIN, HIGH);    // Trigger continuous active buzzer tone
-        digitalWrite(GREEN_LED_PIN, LOW);  // Turn off safe status light
-        Serial.println("⚠️ WARNING: Threshold breached! Alarm sounding.");
+        digitalWrite(RED_LED_PIN, HIGH);   // Threshold breached -> Turn Red On
+        digitalWrite(GREEN_LED_PIN, LOW);  // Turn Green Off
+        alertActive = true;                // Arm the pulsing engine in the background loop
+        Serial.println("⚠️ WARNING: Local threshold breached! Alarm system ARMED.");
     } 
     else if (incomingMessage == triggerOffSignal) {
-        digitalWrite(RED_LED_PIN, LOW);    // Turn off alert light
-        digitalWrite(BUZZER_PIN, LOW);     // Silence active buzzer
-        digitalWrite(GREEN_LED_PIN, HIGH); // Turn on safe status light
-        Serial.println("✅ Status Normalized. Alarm silenced.");
+        digitalWrite(RED_LED_PIN, LOW);    // Turn Red Off
+        digitalWrite(GREEN_LED_PIN, HIGH); // Turn Green On
+        digitalWrite(BUZZER_PIN, LOW);     // Immediate silence safety override
+        alertActive = false;               // Disarm the pulsing engine
+        Serial.println("✅ Status Normalized. Alarm system DISARMED.");
     }
 }
 
@@ -104,45 +132,44 @@ void reconnectBroker() {
 void setup() {
     Serial.begin(115200);
 
+    // Hold everything here until you physically click the BOOT button
+    waitForButtonPress(); 
+
     // Initialize physical pin modes for outputs
     pinMode(GREEN_LED_PIN, OUTPUT);
     pinMode(RED_LED_PIN, OUTPUT);
     pinMode(BUZZER_PIN, OUTPUT);
 
-    // Set safe starting baseline state
+    // Initial predictable boot up state orientation
     digitalWrite(GREEN_LED_PIN, HIGH); 
     digitalWrite(RED_LED_PIN, LOW);
     digitalWrite(BUZZER_PIN, LOW);
 
-    // 1. Establish wireless link
+    // 1. Initialize DHT11 sensor engine
+    dht.begin();
+
+    // 2. Fire up wireless radio stack
     setupWiFi();
 
-    // 2. Fetch unique factory MAC address
+    // 3. Fetch unique hardware signature
     String mac = WiFi.macAddress();
     mac.replace(":", "");
     uniqueNodeId = "ESP32_" + mac;
     telemetryTopic = "monitor/nodes/" + uniqueNodeId + "/telemetry";
     
     Serial.println("==================================================");
-    Serial.println("ESP32 HARDWARE Identity INITIALIZED");
+    Serial.println("ESP32 DHT11 HARDWARE IDENTITY INITIALIZED");
     Serial.println("Node ID  : " + uniqueNodeId);
     Serial.println("Publishing to: " + telemetryTopic);
     Serial.println("==================================================");
 
-    // 3. Start BME280 using your verified 0x76 address
-    if (!bme.begin(0x76)) { 
-        Serial.println("Could not find BME280 sensor breakout! Check connections.");
-        while (1);
-    }
-    Serial.println("[Hardware Core] BME280 online at address 0x76.");
-
-    // 4. Attach communication interface profiles
+    // 4. Attach broker configurations
     client.setServer(mqtt_server, 1883);
     client.setCallback(callback);
 }
 
 // -------------------------------------------------------------------------
-// MAIN PROCESSING LOOP
+// ENGINE LOOP
 // -------------------------------------------------------------------------
 void loop() {
     if (!client.connected()) {
@@ -151,24 +178,37 @@ void loop() {
     client.loop();
 
     unsigned long currentTimestamp = millis();
+
+    // --- 🔍 NON-BLOCKING BUZZER PULSE GENERATOR ---
+    if (alertActive) {
+        // Obtains a continuous recurring window value from 0 to 1999ms
+        unsigned long cycleTime = currentTimestamp % 2000; 
+        
+        if (cycleTime < 150) {
+            digitalWrite(BUZZER_PIN, HIGH); // Quick clean 150ms chirp sound
+        } else {
+            digitalWrite(BUZZER_PIN, LOW);  // Drop low for the remaining 1850ms of the window
+        }
+    }
+
+    // Telemetry generation loop handler frame segment block
     if (currentTimestamp - lastTelemetryTime >= telemetryInterval) {
         lastTelemetryTime = currentTimestamp;
 
-        // Fetch climate data snapshots directly from precision registers
-        float currentTemp = bme.readTemperature();
-        float currentHum  = bme.readHumidity();
-        float currentPres = bme.readPressure() / 100.0F;
+        // Fetch snapshots directly from DHT11 registers
+        float currentTemp = dht.readTemperature();
+        float currentHum  = dht.readHumidity();
 
         if (isnan(currentTemp) || isnan(currentHum)) {
-            Serial.println("⚠️ Error reading data from BME280 hardware layer.");
+            Serial.println("⚠️ Error reading registers off DHT11 hardware layer.");
             return;
         }
 
-        // Build serialization string matching cache database expectations
+        // Build flat dynamic payload formatting. DHT11 lacks pressure, so we pass 0.0
         String jsonPayload = "{\"node\":\"" + uniqueNodeId + 
                              "\",\"temperature\":" + String(currentTemp, 2) + 
                              ",\"humidity\":" + String(currentHum, 2) + 
-                             ",\"pressure\":" + String(currentPres, 2) + "}";
+                             ",\"pressure\": 0.0}";
 
         Serial.print("[Data Egress] Payload packet: ");
         Serial.println(jsonPayload);

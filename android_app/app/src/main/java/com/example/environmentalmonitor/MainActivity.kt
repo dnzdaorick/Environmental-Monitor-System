@@ -1,6 +1,16 @@
 package com.example.environmentalmonitor
 
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -58,13 +68,16 @@ interface ApiService {
 
 class MainActivity : AppCompatActivity() {
 
-    private val localHostIp = "YOUR_LOCAL_HOST_IP"
+    private val localHostIp = "10.0.2.2"
     private lateinit var apiService: ApiService
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var roomAdapter: RoomAdapter
     private lateinit var layoutEmptyState: View
+
+    private val CHANNEL_ID = "temp_alerts"
+    private val activeHighWarnings = mutableSetOf<String>()
 
     private val updateRunnable = object : Runnable {
         override fun run() {
@@ -76,6 +89,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        createNotificationChannel()
+        requestNotificationPermission()
 
         layoutEmptyState = findViewById(R.id.layoutEmptyState)
         recyclerView = findViewById(R.id.recyclerViewRooms)
@@ -104,6 +120,7 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         layoutEmptyState.visibility = View.GONE
                         recyclerView.visibility = View.VISIBLE
+                        processAnomalies(roomList)
                         roomAdapter.updateData(roomList)
                     }
                 } else {
@@ -114,6 +131,55 @@ class MainActivity : AppCompatActivity() {
                 Log.e("MONITOR_DEBUG", "Sync frame drop: ", t)
             }
         })
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val name = "Temperature Alerts"
+            val descriptionText = "Notifications for temperature anomalies"
+            val importance = NotificationManager.IMPORTANCE_HIGH
+            val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
+                description = descriptionText
+            }
+            val notificationManager: NotificationManager =
+                getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
+        }
+    }
+
+    private fun sendNotification(title: String, message: String, id: Int) {
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+
+        val notificationManager: NotificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(id, builder.build())
+    }
+
+    private fun processAnomalies(rooms: List<RoomTelemetry>) {
+        rooms.forEach { room ->
+            // High Temp Check
+            if (room.temperature > room.threshold) {
+                if (!activeHighWarnings.contains(room.rawNodeId)) {
+                    sendNotification("High Temperature Alert", "${room.displayName} is at %.1f°C".format(room.temperature), room.rawNodeId.hashCode())
+                    activeHighWarnings.add(room.rawNodeId)
+                }
+            } else {
+                activeHighWarnings.remove(room.rawNodeId)
+            }
+        }
     }
 
     private fun showConfigureDialog(room: RoomTelemetry) {
@@ -171,6 +237,7 @@ class MainActivity : AppCompatActivity() {
             val txtTemp: TextView = view.findViewById(R.id.txtTemp)
             val txtHum: TextView = view.findViewById(R.id.txtHum)
             val txtPres: TextView = view.findViewById(R.id.txtPres)
+            val txtWarningBadge: TextView = view.findViewById(R.id.txtWarningBadge)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -185,6 +252,16 @@ class MainActivity : AppCompatActivity() {
             holder.txtTemp.text = String.format("%.1f °C", room.temperature)
             holder.txtHum.text = String.format("%.1f %%", room.humidity)
             holder.txtPres.text = if (room.pressure > 0) String.format("%.0f hPa", room.pressure) else "N/A"
+
+            if (room.temperature > room.threshold) {
+                holder.txtWarningBadge.text = "HIGH TEMP"
+                holder.txtWarningBadge.setBackgroundResource(R.drawable.warning_badge_bg)
+                holder.txtWarningBadge.visibility = View.VISIBLE
+                holder.txtTemp.setTextColor(Color.parseColor("#EF4444"))
+            } else {
+                holder.txtWarningBadge.visibility = View.GONE
+                holder.txtTemp.setTextColor(Color.parseColor("#0F172A"))
+            }
 
             holder.btnSettingsRoom.setOnClickListener { onSettingsClicked(room) }
         }
